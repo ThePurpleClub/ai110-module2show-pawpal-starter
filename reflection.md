@@ -7,6 +7,15 @@
 - Briefly describe your initial UML design.
 - What classes did you include, and what responsibilities did you assign to each?
 
+My initial UML design has four classes that separate the data (who and what needs care) from the planning logic (deciding what gets done today). An Owner has one or more Pets, each Pet has zero or more Tasks, and a Scheduler reads the Owner's tasks and builds a daily plan from them.
+
+- **Task**: Represents a single care activity, such as a walk, feeding, or medication. It stores the title, duration in minutes, priority (low/medium/high), category, and whether it has been completed. Its only behavior is marking itself complete.
+- **Pet**: Represents one animal (name, species, age) and owns the list of care tasks that pet needs. It is responsible for adding and removing its own tasks.
+- **Owner**: Represents the person using the app. It holds the owner's name, how many minutes they have available in the day, their preferences, and their list of pets. It can add pets and gather all tasks across every pet, so the scheduler has one place to get everything that needs doing.
+- **Scheduler**: Holds the planning logic. Given an Owner, it sorts tasks by priority, checks whether each task fits in the remaining time, builds the daily plan, and explains why the plan was chosen.
+
+I made Task, Pet, and Owner Python dataclasses because they mostly hold data, which keeps them short and readable. Scheduler is a regular class because its job is behavior rather than storage. Keeping the scheduling rules in one class means I can change how plans are built without touching the data classes.
+
 **b. Design changes**
 
 - Did your design change during implementation?
