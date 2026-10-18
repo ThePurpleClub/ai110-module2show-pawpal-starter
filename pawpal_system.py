@@ -21,6 +21,7 @@ class Task:
     pet_name: str = ""  # set by Pet.add_task so the scheduler knows who the task is for
 
     def __post_init__(self):
+        """Reject invalid duration, priority, or frequency values."""
         if self.duration_minutes <= 0:
             raise ValueError("duration_minutes must be positive")
         if self.priority not in PRIORITY_RANK:
@@ -74,15 +75,13 @@ class Scheduler:
     """Selects and orders tasks into a daily plan for an owner."""
 
     def __init__(self, owner: Owner):
+        """Create a scheduler for an owner with an empty plan."""
         self.owner = owner
         self.plan: List[Task] = []
         self.skipped: List[Tuple[Task, str]] = []  # (task, reason it was left out)
 
     def generate_plan(self) -> List[Task]:
-        """Build the daily plan from the owner's incomplete tasks within their available time.
-
-        Fills self.plan with chosen tasks and self.skipped with (task, reason) for the rest.
-        """
+        """Pick incomplete tasks by priority that fit in the owner's time; record the rest as skipped."""
         self.plan = []
         self.skipped = []
         remaining = self.owner.available_minutes
@@ -105,10 +104,7 @@ class Scheduler:
         return self.plan
 
     def sort_by_priority(self, tasks: List[Task]) -> List[Task]:
-        """Return tasks ordered from highest to lowest priority, using PRIORITY_RANK.
-
-        Ties go to the shorter task, so more tasks fit in the day.
-        """
+        """Return tasks from highest to lowest priority, shorter tasks first on ties."""
         return sorted(tasks, key=lambda t: (-PRIORITY_RANK[t.priority], t.duration_minutes))
 
     def fits_in_time(self, task: Task, remaining: int) -> bool:
@@ -116,10 +112,7 @@ class Scheduler:
         return task.duration_minutes <= remaining
 
     def explain_plan(self) -> str:
-        """Explain which tasks were chosen and why the skipped ones were left out.
-
-        Call generate_plan() first.
-        """
+        """Explain which tasks were chosen and why others were skipped (call generate_plan first)."""
         if not self.plan and not self.skipped:
             return "No plan yet. Add tasks and call generate_plan() first."
 
