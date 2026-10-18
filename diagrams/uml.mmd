@@ -23,12 +23,14 @@ classDiagram
         +str priority
         +str category
         +bool completed
+        +str pet_name
         +mark_complete() void
     }
 
     class Scheduler {
         +Owner owner
         +List~Task~ plan
+        +List~Tuple~ skipped
         +generate_plan() List~Task~
         +sort_by_priority(tasks List~Task~) List~Task~
         +fits_in_time(task Task, remaining int) bool

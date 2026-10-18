@@ -1,7 +1,10 @@
 """PawPal+ logic layer: backend classes for planning pet care tasks."""
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Tuple
+
+# Numeric rank for each priority so sorting isn't alphabetical ("high" < "low" < "medium").
+PRIORITY_RANK = {"high": 3, "medium": 2, "low": 1}
 
 
 @dataclass
@@ -13,6 +16,13 @@ class Task:
     priority: str  # "low", "medium", or "high"
     category: str = "general"
     completed: bool = False
+    pet_name: str = ""  # set by Pet.add_task so the scheduler knows who the task is for
+
+    def __post_init__(self):
+        if self.duration_minutes <= 0:
+            raise ValueError("duration_minutes must be positive")
+        if self.priority not in PRIORITY_RANK:
+            raise ValueError(f"priority must be one of {list(PRIORITY_RANK)}")
 
     def mark_complete(self) -> None:
         """Mark this task as done."""
@@ -29,7 +39,7 @@ class Pet:
     tasks: List[Task] = field(default_factory=list)
 
     def add_task(self, task: Task) -> None:
-        """Add a care task for this pet."""
+        """Add a care task for this pet and tag it with this pet's name."""
         pass
 
     def remove_task(self, task: Task) -> None:
@@ -61,13 +71,17 @@ class Scheduler:
     def __init__(self, owner: Owner):
         self.owner = owner
         self.plan: List[Task] = []
+        self.skipped: List[Tuple[Task, str]] = []  # (task, reason it was left out)
 
     def generate_plan(self) -> List[Task]:
-        """Build the daily plan from the owner's tasks within their available time."""
+        """Build the daily plan from the owner's incomplete tasks within their available time.
+
+        Fills self.plan with chosen tasks and self.skipped with (task, reason) for the rest.
+        """
         pass
 
     def sort_by_priority(self, tasks: List[Task]) -> List[Task]:
-        """Return tasks ordered from highest to lowest priority."""
+        """Return tasks ordered from highest to lowest priority, using PRIORITY_RANK."""
         pass
 
     def fits_in_time(self, task: Task, remaining: int) -> bool:
@@ -75,5 +89,8 @@ class Scheduler:
         pass
 
     def explain_plan(self) -> str:
-        """Return a human-readable explanation of why the plan looks the way it does."""
+        """Explain which tasks were chosen and why the skipped ones were left out.
+
+        Call generate_plan() first.
+        """
         pass
