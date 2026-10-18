@@ -44,10 +44,28 @@ I made Task, Pet, and Owner Python dataclasses because they mostly hold data, wh
 - How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
 - What kinds of prompts or questions were most helpful?
 
+I used Claude Code as a coding assistant throughout the project. I used it to check that my UML had the four classes I needed, to turn the UML into Python class stubs, to review that skeleton before writing logic, to implement the methods, to write a `main.py` demo and a pytest suite, and to commit and push my work to GitHub.
+
+The most helpful prompts were specific and gave the AI a clear job. Asking it to review the skeleton for "missing relationships or potential logic bottlenecks" got much more useful feedback than asking whether the code looked fine. Pasting the assignment's exact requirements (for example, "Task: description, time, frequency, completion status" and "the Scheduler must read from the Owner method") kept the code aligned with what the project asks for.
+
 **b. Judgment and verification**
 
 - Describe one moment where you did not accept an AI suggestion as-is.
 - How did you evaluate or verify what the AI suggested?
+
+When the AI reviewed my skeleton, it listed nine possible problems. I didn't take all of them. I accepted the three that mattered most right away:
+- **Priority sorting:** sorting priority strings would be alphabetical, putting "high" before "low" before "medium", so I added a numeric `PRIORITY_RANK`.
+- **Pet link:** tasks didn't know which pet they belonged to, so I added `pet_name`.
+- **Skipped tasks:** the scheduler couldn't explain skipped tasks, so I added a `skipped` list with reasons.
+
+I held off on others, like adding start times to the plan and using the owner's `preferences`. Those depend on design decisions I hadn't made yet, and adding them early would have made the code more complicated than the project needed at that point.
+
+I also changed things the AI first produced when they didn't match the assignment. The first `Task` class followed my UML, with `title` and `category` fields. The assignment asked for description, time, frequency, and completion status, so I had it changed to match, and I updated the UML too. The first version of `main.py` only gave two tasks a time, and the assignment required at least three tasks with different times, so I had that fixed as well.
+
+To verify the results, I:
+- ran `python main.py` and checked that the schedule made sense: high-priority tasks first, the total within 60 minutes, and the completed task and the task that didn't fit both listed as skipped
+- ran `pytest` after each change; all 16 tests pass, including tests for the priority-order bug and for the scheduler pulling tasks from both pets
+- checked GitHub after each push to confirm the commit was actually there
 
 ---
 

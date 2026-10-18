@@ -42,6 +42,21 @@ pip install -r requirements.txt
 6. Connect your logic to the Streamlit UI in `app.py`.
 7. Refine UML so it matches what you actually built.
 
+## 🧩 Implementation Summary
+
+PawPal+ keeps all backend logic in `pawpal_system.py`, in four classes (UML in `diagrams/uml.mmd`):
+
+| Class | Role |
+|-------|------|
+| `Task` | One care activity: description, duration, priority (low/medium/high), preferred time, frequency (once/daily/weekly), and completion status. Rejects invalid values on creation. |
+| `Pet` | A pet's details plus its list of tasks. `add_task()` tags each task with the pet's name. |
+| `Owner` | The user, their available minutes for the day, and their pets. `get_all_tasks()` returns every pet's tasks in one list. |
+| `Scheduler` | The "brain." Builds the daily plan from the owner's tasks and explains it. |
+
+**How they work together:** an `Owner` has one or more `Pet`s, and each `Pet` has `Task`s. The `Scheduler` is given the `Owner` and reads tasks only through `Owner.get_all_tasks()`, so a single plan covers every pet. `generate_plan()` drops completed tasks, sorts the rest by priority (shorter tasks first on ties), and adds each task while it fits in the remaining time. Anything left out is recorded with a reason, and `explain_plan()` turns the chosen and skipped tasks into a plain-language summary.
+
+`main.py` runs a two-pet demo in the terminal, and `tests/test_pawpal.py` covers the key behaviors (run with `pytest`).
+
 ## 🖥️ Sample Output
 
 Output from running `python main.py` (owner Jordan, 60 minutes available, two pets with five tasks):
