@@ -5,16 +5,18 @@ from typing import List, Tuple
 
 # Numeric rank for each priority so sorting isn't alphabetical ("high" < "low" < "medium").
 PRIORITY_RANK = {"high": 3, "medium": 2, "low": 1}
+FREQUENCIES = ("once", "daily", "weekly")
 
 
 @dataclass
 class Task:
     """A single pet care activity, such as a walk, feeding, or medication."""
 
-    title: str
+    description: str
     duration_minutes: int
-    priority: str  # "low", "medium", or "high"
-    category: str = "general"
+    priority: str = "medium"  # "low", "medium", or "high"
+    time: str = ""  # preferred start time as "HH:MM", or "" for any time
+    frequency: str = "daily"  # "once", "daily", or "weekly"
     completed: bool = False
     pet_name: str = ""  # set by Pet.add_task so the scheduler knows who the task is for
 
@@ -23,10 +25,12 @@ class Task:
             raise ValueError("duration_minutes must be positive")
         if self.priority not in PRIORITY_RANK:
             raise ValueError(f"priority must be one of {list(PRIORITY_RANK)}")
+        if self.frequency not in FREQUENCIES:
+            raise ValueError(f"frequency must be one of {list(FREQUENCIES)}")
 
     def mark_complete(self) -> None:
         """Mark this task as done."""
-        pass
+        self.completed = True
 
 
 @dataclass
@@ -40,11 +44,12 @@ class Pet:
 
     def add_task(self, task: Task) -> None:
         """Add a care task for this pet and tag it with this pet's name."""
-        pass
+        task.pet_name = self.name
+        self.tasks.append(task)
 
     def remove_task(self, task: Task) -> None:
         """Remove a care task from this pet."""
-        pass
+        self.tasks.remove(task)
 
 
 @dataclass
@@ -58,11 +63,11 @@ class Owner:
 
     def add_pet(self, pet: Pet) -> None:
         """Add a pet to this owner."""
-        pass
+        self.pets.append(pet)
 
     def get_all_tasks(self) -> List[Task]:
         """Return every task across all of this owner's pets."""
-        pass
+        return [task for pet in self.pets for task in pet.tasks]
 
 
 class Scheduler:
@@ -78,19 +83,59 @@ class Scheduler:
 
         Fills self.plan with chosen tasks and self.skipped with (task, reason) for the rest.
         """
-        pass
+        self.plan = []
+        self.skipped = []
+        remaining = self.owner.available_minutes
+
+        pending = []
+        for task in self.owner.get_all_tasks():
+            if task.completed:
+                self.skipped.append((task, "already completed"))
+            else:
+                pending.append(task)
+
+        for task in self.sort_by_priority(pending):
+            if self.fits_in_time(task, remaining):
+                self.plan.append(task)
+                remaining -= task.duration_minutes
+            else:
+                self.skipped.append(
+                    (task, f"needs {task.duration_minutes} min but only {remaining} min left")
+                )
+        return self.plan
 
     def sort_by_priority(self, tasks: List[Task]) -> List[Task]:
-        """Return tasks ordered from highest to lowest priority, using PRIORITY_RANK."""
-        pass
+        """Return tasks ordered from highest to lowest priority, using PRIORITY_RANK.
+
+        Ties go to the shorter task, so more tasks fit in the day.
+        """
+        return sorted(tasks, key=lambda t: (-PRIORITY_RANK[t.priority], t.duration_minutes))
 
     def fits_in_time(self, task: Task, remaining: int) -> bool:
         """Return True if the task fits in the remaining minutes."""
-        pass
+        return task.duration_minutes <= remaining
 
     def explain_plan(self) -> str:
         """Explain which tasks were chosen and why the skipped ones were left out.
 
         Call generate_plan() first.
         """
-        pass
+        if not self.plan and not self.skipped:
+            return "No plan yet. Add tasks and call generate_plan() first."
+
+        used = sum(t.duration_minutes for t in self.plan)
+        lines = [
+            f"Plan for {self.owner.name}: {used} of {self.owner.available_minutes} min used.",
+            "Tasks are chosen by priority (high first), shorter tasks first on ties.",
+        ]
+        for i, t in enumerate(self.plan, 1):
+            when = f" at {t.time}" if t.time else ""
+            lines.append(
+                f"  {i}. {t.description} for {t.pet_name}{when}"
+                f" ({t.duration_minutes} min, {t.priority} priority, {t.frequency})"
+            )
+        if self.skipped:
+            lines.append("Skipped:")
+            for t, reason in self.skipped:
+                lines.append(f"  - {t.description} for {t.pet_name}: {reason}")
+        return "\n".join(lines)
