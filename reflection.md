@@ -35,6 +35,10 @@ I made Task, Pet, and Owner Python dataclasses because they mostly hold data, wh
 - Describe one tradeoff your scheduler makes.
 - Why is that tradeoff reasonable for this scenario?
 
+My scheduler picks tasks greedily: it sorts them by priority (shorter tasks first on ties) and adds each one if it still fits in the owner's remaining time. It never goes back to try a different combination. This means it doesn't always use the available time as fully as possible. In my `main.py` demo with a 60-minute budget, it chose Feeding (10 min), Morning walk (30 min), and Brushing (15 min) for 55 minutes, then skipped the Evening walk, Playtime, and Fetch because only 5 minutes were left. A search over every combination (like a knapsack algorithm) could sometimes fill the time more completely, for example by swapping one longer medium task for two shorter low-priority ones.
+
+I think this tradeoff is reasonable for a pet owner. A higher-priority task should never get bumped just so the minutes add up more neatly. Feeding and medication matter more than playtime, even if that leaves a few minutes unused. The greedy approach is also easy to explain: every skipped task gets a clear reason like "needs 20 min but only 5 min left", which an owner can understand and act on. An optimal search would be harder to explain and slower as the task list grows, and a typical owner only has a handful of tasks a day, so the extra efficiency wouldn't be worth the added complexity.
+
 ---
 
 ## 3. AI Collaboration
