@@ -259,6 +259,13 @@ def test_same_pet_overlap_is_a_conflict(owner):
     assert "both for Mochi" in warnings[0]
 
 
+def test_exact_duplicate_time_for_same_pet_is_a_conflict(owner):
+    owner.pets[0].add_task(Task("Pill", 5, time="08:00"))  # same start as Mochi's walk
+    warnings = Scheduler(owner).detect_conflicts()
+    assert len(warnings) == 1
+    assert "Morning walk" in warnings[0] and "Pill" in warnings[0]
+
+
 def test_back_to_back_tasks_do_not_conflict(owner):
     owner.pets[0].add_task(Task("Breakfast", 10, time="08:30"))  # starts right as the walk ends
     assert Scheduler(owner).detect_conflicts() == []
@@ -306,3 +313,190 @@ def test_invalid_time_does_not_hide_real_conflicts(owner):
     warnings = Scheduler(owner).detect_conflicts()
     assert any("not a valid" in w for w in warnings)
     assert any("Feeding" in w and "Vet call" in w for w in warnings)
+
+
+# --- Edge cases ---
+
+def test_task_that_exactly_fills_remaining_time_is_scheduled():
+    owner = Owner(name="Sam", available_minutes=40)
+    pet = Pet(name="Rex", species="dog")
+    owner.add_pet(pet)
+    pet.add_task(Task("Walk", 30, "high"))
+    pet.add_task(Task("Feeding", 10, "medium"))  # exactly the 10 min left after the walk
+    scheduler = Scheduler(owner)
+    plan = scheduler.generate_plan()
+    assert [t.description for t in plan] == ["Walk", "Feeding"]
+    assert scheduler.skipped == []
+
+
+def test_completing_a_task_twice_creates_only_one_next_occurrence():
+    pet = Pet(name="Mochi", species="dog")
+    walk = Task("Walk", 30, frequency="daily")
+    pet.add_task(walk)
+    assert pet.complete_task(walk) is not None
+    assert pet.complete_task(walk) is None  # second call is a no-op
+    assert len(pet.tasks) == 2
+
+
+def test_sort_by_time_orders_by_date_before_time():
+    scheduler = Scheduler(Owner(name="Sam", available_minutes=60))
+    today = date(2026, 10, 18)
+    tasks = [
+        Task("Tomorrow breakfast", 10, time="07:00", due_date=today + timedelta(days=1)),
+        Task("Today play", 10, due_date=today),
+        Task("Today walk", 10, time="08:00", due_date=today),
+    ]
+    result = scheduler.sort_by_time(tasks)
+    assert [t.description for t in result] == ["Today walk", "Today play", "Tomorrow breakfast"]
+
+
+# --- More edge cases ---
+
+def make_owner(minutes=60):
+    """An owner with one pet and no tasks, for tests that build their own task list."""
+    owner = Owner(name="Sam", available_minutes=minutes)
+    pet = Pet(name="Rex", species="dog")
+    owner.add_pet(pet)
+    return owner, pet
+
+
+# Known gaps: these document behavior we want but don't have yet. strict=True makes each
+# one fail loudly once it's fixed, as a reminder to remove the xfail marker.
+
+@pytest.mark.xfail(strict=True, reason="sort_by_time compares times as strings, so '8:00' sorts after '10:00'")
+def test_sort_by_time_handles_times_without_leading_zero():
+    scheduler = Scheduler(Owner(name="Sam", available_minutes=60))
+    tasks = [Task("Dinner", 10, time="10:00"), Task("Breakfast", 10, time="8:00")]
+    assert [t.description for t in scheduler.sort_by_time(tasks)] == ["Breakfast", "Dinner"]
+
+
+@pytest.mark.xfail(strict=True, reason="to_minutes doesn't check that minutes are 0-59")
+def test_time_with_out_of_range_minutes_gives_warning():
+    owner, pet = make_owner()
+    pet.add_task(Task("Walk", 10, time="08:75"))
+    warnings = Scheduler(owner).detect_conflicts()
+    assert any("not a valid HH:MM time" in w for w in warnings)
+
+
+@pytest.mark.xfail(strict=True, reason="next due date is due_date + interval, which can still be in the past")
+def test_completing_overdue_daily_task_schedules_next_one_in_the_future():
+    task = Task("Feeding", 10, frequency="daily", due_date=date.today() - timedelta(days=3))
+    assert task.mark_complete().due_date > date.today()
+
+
+@pytest.mark.xfail(strict=True, reason="conflicts are only checked between tasks on the same due_date")
+def test_task_running_past_midnight_conflicts_with_next_morning():
+    owner, pet = make_owner()
+    today = date(2026, 10, 18)
+    pet.add_task(Task("Night walk", 60, time="23:30", due_date=today))  # runs until 00:30
+    pet.add_task(Task("Early meds", 5, time="00:15", due_date=today + timedelta(days=1)))
+    assert len(Scheduler(owner).detect_conflicts()) == 1
+
+
+@pytest.mark.xfail(strict=True, reason="list.remove matches tasks by equal fields, not identity")
+def test_remove_task_removes_the_exact_task_when_duplicates_exist():
+    pet = Pet(name="Mochi", species="dog")
+    first, second = Task("Walk", 30), Task("Walk", 30)
+    pet.add_task(first)
+    pet.add_task(second)
+    pet.remove_task(second)
+    assert len(pet.tasks) == 1
+    assert pet.tasks[0] is first
+
+
+# Planning
+
+def test_overdue_task_is_planned():
+    owner, pet = make_owner()
+    late = Task("Meds", 5, "high", due_date=date.today() - timedelta(days=2))
+    pet.add_task(late)
+    assert any(t is late for t in Scheduler(owner).generate_plan())
+
+
+def test_planner_keeps_going_after_a_task_does_not_fit():
+    owner, pet = make_owner(minutes=30)
+    pet.add_task(Task("Long hike", 60, "high"))
+    pet.add_task(Task("Feeding", 10, "low"))
+    scheduler = Scheduler(owner)
+    assert [t.description for t in scheduler.generate_plan()] == ["Feeding"]
+    assert [t.description for t, _ in scheduler.skipped] == ["Long hike"]
+
+
+def test_zero_available_minutes_skips_everything(owner):
+    owner.available_minutes = 0
+    scheduler = Scheduler(owner)
+    assert scheduler.generate_plan() == []
+    assert len(scheduler.skipped) == 4
+    assert all("only 0 min left" in reason for _, reason in scheduler.skipped)
+
+
+def test_sort_by_priority_keeps_insertion_order_on_full_ties():
+    scheduler = Scheduler(Owner(name="Sam", available_minutes=60))
+    tasks = [Task("A", 10, "high"), Task("B", 10, "high"), Task("C", 10, "high")]
+    assert [t.description for t in scheduler.sort_by_priority(tasks)] == ["A", "B", "C"]
+
+
+def test_generate_plan_twice_does_not_accumulate(owner):
+    scheduler = Scheduler(owner)
+    first_plan = scheduler.generate_plan()
+    first_skipped = list(scheduler.skipped)
+    assert scheduler.generate_plan() == first_plan
+    assert scheduler.skipped == first_skipped
+
+
+def test_replanning_after_completion_frees_up_time(owner):
+    scheduler = Scheduler(owner)
+    assert "Fetch" not in [t.description for t in scheduler.generate_plan()]
+    walk = owner.pets[0].tasks[0]
+    scheduler.complete_task(walk)  # frees 30 min; the next walk is due tomorrow
+    plan = scheduler.generate_plan(today=walk.due_date)
+    assert [t.description for t in plan] == ["Feeding", "Brushing", "Fetch"]
+
+
+# Recurrence
+
+def test_chained_completions_step_forward_one_day_each():
+    pet = Pet(name="Mochi", species="dog")
+    task = Task("Walk", 30, frequency="daily", due_date=date(2026, 10, 18))
+    pet.add_task(task)
+    for _ in range(3):
+        task = pet.complete_task(task)
+    assert task.due_date == date(2026, 10, 21)
+    assert [t.completed for t in pet.tasks] == [True, True, True, False]
+
+
+def test_next_occurrence_is_independent_of_original():
+    pet = Pet(name="Mochi", species="dog")
+    walk = Task("Walk", 30, "high", time="08:00", frequency="daily")
+    pet.add_task(walk)
+    next_walk = pet.complete_task(walk)
+    next_walk.description = "Evening walk"
+    assert walk.description == "Walk"
+    assert walk.completed is True
+    assert next_walk.pet_name == "Mochi"
+
+
+@pytest.mark.parametrize(
+    "frequency, due, expected",
+    [
+        ("weekly", date(2026, 12, 28), date(2027, 1, 4)),  # year boundary
+        ("daily", date(2026, 10, 31), date(2026, 11, 1)),  # month boundary
+        ("daily", date(2028, 2, 28), date(2028, 2, 29)),  # leap day
+    ],
+)
+def test_recurrence_crosses_month_and_year_boundaries(frequency, due, expected):
+    task = Task("Walk", 30, frequency=frequency, due_date=due)
+    assert task.mark_complete().due_date == expected
+
+
+# Data quirks
+
+def test_pets_with_same_name_are_merged_by_filter():
+    # Documents a current limitation: tasks are tagged by pet name, not by pet.
+    owner = Owner(name="Sam", available_minutes=60)
+    first, second = Pet(name="Max", species="dog"), Pet(name="Max", species="cat")
+    owner.add_pet(first)
+    owner.add_pet(second)
+    first.add_task(Task("Walk", 30))
+    second.add_task(Task("Litter", 10))
+    assert len(Scheduler(owner).filter_tasks(pet_name="Max")) == 2

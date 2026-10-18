@@ -114,18 +114,50 @@ python -m pytest
 python -m pytest -v
 ```
 
-The 40 tests in `tests/test_pawpal.py` cover task validation, priority ordering, time budgets, skipped-task reasons, sorting by time, filtering by pet and status, recurring tasks and due dates, and conflict detection (including same-time tasks, back-to-back tasks, and malformed times).
+The 61 tests in `tests/test_pawpal.py` cover:
 
-Sample test output:
+- **Sorting correctness:** tasks come back in chronological order, untimed tasks go last, and earlier dates come before later ones. Priority sorting is high → medium → low (not alphabetical), with shorter tasks first and insertion order kept on full ties.
+- **Recurrence logic:** completing a daily task creates a new task for the following day, and a weekly task creates one 7 days later. `"once"` tasks don't recur, and completing a task twice creates only one copy. Due dates roll over month, year, and leap-day boundaries correctly.
+- **Conflict detection:** the scheduler flags tasks at the exact same time, for the same pet or for different pets, as well as overlapping tasks. Back-to-back tasks are not flagged, and a malformed time gets its own warning instead of crashing the check.
+- **Planning:** the plan stays within the time budget (including a task that exactly fills it), skipped tasks get a reason, overdue tasks are included, the planner keeps going after a task that doesn't fit, and replanning doesn't stack up old results.
+- **Validation and filtering:** invalid durations, priorities, and frequencies are rejected, and tasks can be filtered by pet, by status, or both.
+
+### Known limitations (expected failures)
+
+Five tests are marked `xfail`. They describe behavior PawPal+ doesn't handle yet, so pytest reports them as expected failures (`x`) instead of errors:
+
+| Test | Limitation |
+|------|------------|
+| `test_sort_by_time_handles_times_without_leading_zero` | `"8:00"` sorts after `"10:00"` because times are compared as text |
+| `test_time_with_out_of_range_minutes_gives_warning` | A time like `"08:75"` is accepted without a warning |
+| `test_completing_overdue_daily_task_schedules_next_one_in_the_future` | Completing an overdue recurring task can create a next copy that is already overdue |
+| `test_task_running_past_midnight_conflicts_with_next_morning` | A task that runs past midnight isn't checked against the next day's tasks |
+| `test_remove_task_removes_the_exact_task_when_duplicates_exist` | With two identical tasks, `remove_task()` may remove the wrong one |
+
+Each one uses `strict=True`, so once a limitation is fixed, that test errors as a reminder to remove its `xfail` marker.
+
+Output of a successful `python -m pytest` run:
 
 ```
 ============================= test session starts ==============================
-collected 40 items
+platform darwin -- Python 3.13.3, pytest-9.1.1, pluggy-1.7.0
+rootdir: /Users/monica/Documents/Codepath/ai110-module2show-pawpal-starter-main
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.15.1
+collected 61 items
 
-tests/test_pawpal.py ........................................            [100%]
+tests/test_pawpal.py ............................................xxxxx.. [ 83%]
+..........                                                               [100%]
 
-============================== 40 passed in 0.02s ==============================
+======================== 56 passed, 5 xfailed in 0.05s =========================
 ```
+
+### Confidence Level: ★★★★☆ (4/5)
+
+- **Why 4 stars:** all 56 tests of current behavior pass, covering sorting, recurrence, conflict detection, planning, and validation, including edge cases like exact-fit time budgets, double completion, and malformed times.
+- **Why not 5:** the five expected failures above are real gaps. The most likely to matter in everyday use are times written without a leading zero (`"8:00"`) and completing an overdue recurring task.
+- **Not yet tested:** the Streamlit UI in `app.py` has no automated tests, so the rating covers the scheduling logic in `pawpal_system.py`.
 
 ## 📐 Smarter Scheduling
 
@@ -140,7 +172,7 @@ Beyond the basic priority plan, the `Scheduler` (in `pawpal_system.py`) adds fou
 
 ### Sorting: `Scheduler.sort_by_time()`
 
-Returns a new list of tasks in clock order using the sort key `(t.time == "", t.time)`. Tasks with no preferred time go last, because `False` sorts before `True`. Zero-padded `"HH:MM"` strings sort correctly as plain text, so no time parsing is needed. The input list is not changed.
+Returns a new list of tasks sorted by due date, then clock order, using the sort key `(t.due_date, t.time == "", t.time)`. Within each day, tasks with no preferred time go last, because `False` sorts before `True`. Sorting by date first keeps tomorrow's 07:00 task from landing before today's 08:00 task. Zero-padded `"HH:MM"` strings sort correctly as plain text, so no time parsing is needed. The input list is not changed.
 
 `Scheduler.sort_by_priority()` is used by `generate_plan()` to decide *which* tasks fit: high before medium before low (using the numeric `PRIORITY_RANK`, not alphabetical order), with shorter tasks first on ties. A common pattern is to choose by priority and then display by time:
 
@@ -187,7 +219,7 @@ Warnings:
 Each task has a `due_date` (defaults to today) and a `frequency` of `"once"`, `"daily"`, or `"weekly"`.
 
 - `Task.next_occurrence()` returns a fresh, incomplete copy due 1 day later (daily) or 7 days later (weekly), or `None` for `"once"` tasks. It uses `dataclasses.replace()`, so the description, time, priority, and pet carry over.
-- `Task.mark_complete()` marks the task done and returns its next occurrence, without adding it anywhere.
+- `Task.mark_complete()` marks the task done and returns its next occurrence, without adding it anywhere. Completing a task that's already done returns `None`, so a repeated call (like a double-click in the app) can't create duplicate copies.
 - `Pet.complete_task(task)` marks the task done **and** adds the next occurrence to that pet.
 - `Scheduler.complete_task(task)` finds which pet owns the task and calls `Pet.complete_task()`.
 

@@ -37,7 +37,11 @@ class Task:
         """Mark this task as done and return its next occurrence, or None if it doesn't recur.
 
         The returned task is not added to any pet; use Pet.complete_task for that.
+        Completing an already-completed task does nothing and returns None, so a repeated
+        call (like a double-click) can't create duplicate next occurrences.
         """
+        if self.completed:
+            return None
         self.completed = True
         return self.next_occurrence()
 
@@ -145,10 +149,10 @@ class Scheduler:
         return sorted(tasks, key=lambda t: (-PRIORITY_RANK[t.priority], t.duration_minutes))
 
     def sort_by_time(self, tasks: List[Task]) -> List[Task]:
-        """Return tasks in clock order by their "HH:MM" time; tasks with no time go last."""
+        """Return tasks by due date, then clock order by "HH:MM" time; untimed tasks go last each day."""
         # Zero-padded "HH:MM" strings sort correctly as plain strings, so no parsing is needed.
-        # The key (t.time == "", t.time) puts False (has a time) before True (no time).
-        return sorted(tasks, key=lambda t: (t.time == "", t.time))
+        # (t.time == "") puts False (has a time) before True (no time) within each day.
+        return sorted(tasks, key=lambda t: (t.due_date, t.time == "", t.time))
 
     def filter_tasks(
         self, completed: Optional[bool] = None, pet_name: Optional[str] = None
