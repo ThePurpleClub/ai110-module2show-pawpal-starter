@@ -15,6 +15,7 @@ classDiagram
         +List~Task~ tasks
         +add_task(task Task) void
         +remove_task(task Task) void
+        +complete_task(task Task) Task
     }
 
     class Task {
@@ -25,20 +26,32 @@ classDiagram
         +str frequency
         +bool completed
         +str pet_name
-        +mark_complete() void
+        +date due_date
+        +mark_complete() Task
+        +next_occurrence() Task
     }
 
     class Scheduler {
         +Owner owner
         +List~Task~ plan
         +List~Tuple~ skipped
-        +generate_plan() List~Task~
+        +List~str~ conflicts
+        +generate_plan(today date) List~Task~
         +sort_by_priority(tasks List~Task~) List~Task~
+        +sort_by_time(tasks List~Task~) List~Task~
+        +filter_tasks(completed bool, pet_name str) List~Task~
+        +detect_conflicts(tasks List~Task~) List~str~
+        +complete_task(task Task) Task
         +fits_in_time(task Task, remaining int) bool
         +explain_plan() str
     }
 
-    Owner "1" o-- "1..*" Pet : owns
+    Owner "1" o-- "0..*" Pet : owns
     Pet "1" *-- "0..*" Task : has
+    Task ..> Task : creates next occurrence
     Scheduler --> Owner : plans for
-    Scheduler ..> Task : orders and selects
+    Scheduler ..> Pet : completes task via
+    Scheduler ..> Task : sorts, filters, checks conflicts
+
+    note for Task "mark_complete(), next_occurrence(), and complete_task() return None for 'once' tasks"
+    note for Scheduler "Module helpers: PRIORITY_RANK, FREQUENCIES, RECURRENCE_INTERVALS, to_minutes()"

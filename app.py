@@ -1,3 +1,6 @@
+from datetime import date
+
+import pandas as pd
 import streamlit as st
 
 from pawpal_system import Owner, Pet, Scheduler, Task
@@ -112,47 +115,165 @@ else:
         except ValueError as e:
             st.error(str(e))
 
-all_tasks = owner.get_all_tasks()
-if all_tasks:
-    st.write("Current tasks:")
-    st.table(
-        [
-            {
-                "pet": t.pet_name,
-                "task": t.description,
-                "time": t.time or "any",
-                "minutes": t.duration_minutes,
-                "priority": t.priority,
-                "frequency": t.frequency,
-                "done": t.completed,
-            }
-            for t in all_tasks
-        ]
+scheduler = Scheduler(owner)
+
+PRIORITY_LABELS = {"high": "🔴 High", "medium": "🟡 Medium", "low": "🟢 Low"}
+
+
+def due_label(day):
+    """Show today and tomorrow by name, other days as e.g. "Sun, Oct 25"."""
+    offset = (day - date.today()).days
+    if offset == 0:
+        return "Today"
+    if offset == 1:
+        return "Tomorrow"
+    if offset < 0:
+        return f"Overdue ({day:%b %d})"
+    return f"{day:%a, %b %d}"
+
+
+def task_table(tasks, show_status=True):
+    """Show tasks as a numbered table with readable labels."""
+    rows = []
+    for t in tasks:
+        row = {
+            "Due": due_label(t.due_date),
+            "Time": t.time or "Any time",
+            "Pet": t.pet_name,
+            "Task": t.description,
+            "Duration": f"{t.duration_minutes} min",
+            "Priority": PRIORITY_LABELS[t.priority],
+            "Repeats": t.frequency.capitalize(),
+        }
+        if show_status:
+            row["Status"] = "✅ Done" if t.completed else "⏳ To do"
+        rows.append(row)
+    st.table(pd.DataFrame(rows, index=range(1, len(rows) + 1)))
+
+
+# --- Current tasks: filtered and sorted by the Scheduler ---
+if owner.get_all_tasks():
+    st.subheader("Current Tasks")
+    col1, col2 = st.columns(2)
+    with col1:
+        pet_filter = st.selectbox("Show pet", ["All pets"] + [p.name for p in owner.pets])
+    with col2:
+        status_filter = st.selectbox("Show status", ["All", "To do", "Done"])
+
+    tasks = scheduler.filter_tasks(
+        completed={"All": None, "To do": False, "Done": True}[status_filter],
+        pet_name=None if pet_filter == "All pets" else pet_filter,
     )
+    # Conflicts across every pet, so the owner sees clashes before building a plan.
+    conflicts = scheduler.detect_conflicts()
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Tasks shown", len(tasks))
+    col2.metric("Still to do", sum(not t.completed for t in tasks))
+    col3.metric("Time conflicts", len(conflicts))
+
+    if tasks:
+        task_table(scheduler.sort_by_time(tasks))
+        st.caption("Sorted by due date, then time. Tasks with no set time are listed last each day.")
+    else:
+        st.info("No tasks match these filters.", icon="🔍")
+
+    if conflicts:
+        for warning in conflicts:
+            st.warning(warning, icon="⚠️")
+    else:
+        st.success("No time conflicts across your pets.", icon="✅")
+
+    # --- Complete a task (recurring tasks schedule their next occurrence) ---
+    st.subheader("Complete a Task")
+    if "flash" in st.session_state:
+        st.success(st.session_state.pop("flash"), icon="🎉")
+    todo = scheduler.sort_by_time(scheduler.filter_tasks(completed=False))
+    if todo:
+        choice = st.selectbox(
+            "Task",
+            range(len(todo)),
+            format_func=lambda i: (
+                f"{todo[i].pet_name}: {todo[i].description} "
+                f"({due_label(todo[i].due_date)}{', ' + todo[i].time if todo[i].time else ''})"
+            ),
+        )
+        if st.button("Mark complete"):
+            task = todo[choice]
+            next_task = scheduler.complete_task(task)
+            # Saved for after the rerun, which refreshes the task table above.
+            if next_task:
+                st.session_state.flash = (
+                    f"Completed '{task.description}' for {task.pet_name}. Next {task.frequency} "
+                    f"occurrence is due {due_label(next_task.due_date).lower()}."
+                )
+            else:
+                st.session_state.flash = (
+                    f"Completed '{task.description}' for {task.pet_name}. It doesn't repeat."
+                )
+            st.rerun()
+    else:
+        st.success("Everything is done!", icon="🎉")
 
 st.divider()
 
 # --- Build schedule ---
 st.subheader("Build Schedule")
 
-if st.button("Generate schedule"):
-    scheduler = Scheduler(owner)
+if st.button("Generate schedule", type="primary"):
     plan = scheduler.generate_plan()
+    used = sum(t.duration_minutes for t in plan)
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Tasks scheduled", len(plan))
+    col2.metric("Minutes used", f"{used} / {owner.available_minutes}")
+    col3.metric("Minutes free", owner.available_minutes - used)
+    st.progress(used / owner.available_minutes, text="Time budget used")
+
     if plan:
         st.markdown("#### Today's Schedule")
-        st.table(
-            [
-                {
-                    "time": t.time or "any",
-                    "task": t.description,
-                    "pet": t.pet_name,
-                    "minutes": t.duration_minutes,
-                    "priority": t.priority,
-                }
-                for t in sorted(plan, key=lambda t: t.time or "99:99")
-            ]
-        )
+        task_table(scheduler.sort_by_time(plan), show_status=False)
+        st.caption("Chosen by priority (high first, shorter first on ties), shown in time order.")
     else:
-        st.warning("Nothing could be scheduled. Add tasks or increase your available minutes.")
-    st.markdown("#### Why this plan")
-    st.text(scheduler.explain_plan())
+        st.warning(
+            "Nothing could be scheduled. Add tasks or increase your available minutes.", icon="📭"
+        )
+
+    if scheduler.conflicts:
+        st.markdown("#### Conflicts in this plan")
+        for warning in scheduler.conflicts:
+            st.warning(warning, icon="⚠️")
+    elif plan:
+        st.success("No time conflicts in today's plan.", icon="✅")
+
+    # "needs N min" reasons mean the task ran out of time; the rest weren't needed today.
+    no_time = [(t, r) for t, r in scheduler.skipped if r.startswith("needs")]
+    not_today = [(t, r) for t, r in scheduler.skipped if not r.startswith("needs")]
+    if no_time:
+        st.markdown("#### Didn't fit today")
+        st.warning(
+            f"{len(no_time)} task(s) didn't fit in your {owner.available_minutes} minutes. "
+            "Free up time or raise their priority.",
+            icon="⏰",
+        )
+        st.table(
+            pd.DataFrame(
+                [
+                    {"Pet": t.pet_name, "Task": t.description,
+                     "Priority": PRIORITY_LABELS[t.priority], "Reason": r}
+                    for t, r in no_time
+                ],
+                index=range(1, len(no_time) + 1),
+            )
+        )
+    if not_today:
+        with st.expander(f"Not needed today ({len(not_today)})"):
+            st.table(
+                pd.DataFrame(
+                    [{"Pet": t.pet_name, "Task": t.description, "Reason": r} for t, r in not_today],
+                    index=range(1, len(not_today) + 1),
+                )
+            )
+
+    with st.expander("Why this plan"):
+        st.text(scheduler.explain_plan())
